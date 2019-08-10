@@ -79,8 +79,9 @@ void get(string key, int hashed, int action){
 
 	//retrieve value
 	if (action < 2)
-		for (int ii=0;ii<size;++ii)
-			printf("%c", (char)dataPtr[ii]);
+		//for (int ii=0;ii<size;++ii)
+            //write(1, dataPtr+ii, 1);
+            write(1, dataPtr, size);
 	shmdt(sizePtr);
 	shmdt(dataPtr);
 
