@@ -4,6 +4,7 @@
 #include <sys/shm.h>
 #include <sys/ipc.h>
 #include <unistd.h>
+#include <boost/algorithm/string.hpp>
 using namespace std;
 
 int metaKey; //shm key for list of all keys
@@ -95,10 +96,8 @@ typedef struct metadata {
 	char list[10000];
 } metadata ;
 void handleKeys(string key, int action){
-	cerr << "handling keys\n";
 	int metaId = shmget(875784987, 10016, IPC_EXCL | IPC_CREAT | 0666);
 	int init = 0;
-	string S;
 	if (metaId<0) {
 		metaId = shmget(875784987, 10016, 0);
 		if (metaId<0) {cerr<<"metakey error\n";exit(1);}
@@ -107,6 +106,7 @@ void handleKeys(string key, int action){
 	if (keys==(void*)-1) {cerr<<"metakey list error\n";exit(1);}
 	hash<string> hasher;
 	int hashed;
+
 	//initialize
 	if (init) {
 		keys->size = 0;
@@ -115,37 +115,35 @@ void handleKeys(string key, int action){
 	}
 
 	//insert, list, remove
+    int i=0;
+    vector<string> split;
+    string text = string(keys->list);
+    if (text.length()>0) text.pop_back();
+    boost::split(split, text, [](char c){return c == ':';});
 	switch (action) {
 
 	//add key
 	case 1:
-	cerr << "adding key " << key << endl;
-	for (int ii=0;ii<key.length();++ii){
-		cerr << ii << " ";
-		keys->list[keys->size++] = key.at(ii);
-		cerr << ii << " ";
-	}
-	keys->size++;
+	for (i=0;keys->list[i]!=0;i++);
+	for (int ii=0; ii<key.length(); ii++)
+		keys->list[i++] = key.at(ii);
+    keys->list[i++] = ':';
 	break;
 
 	//list or delete all keys
 	case 2:
 	case 3:
-		for (int ii=0;ii<=keys->size;++ii){
-			if (keys->list[ii] == 0 && S != ""){
-				switch (action){
-				case 2:
-					cout << S << endl;
-					break;
-				case 3:
-					cout << S << endl;
-					hashed = hasher(S);
-					get(S, hashed, 3);
-				}
-				S = "";
-			}
-			S += keys->list[ii];
-		}
+		for (int ii=0; ii<split.size(); ii++){
+            if (split[ii] == "") continue;
+            switch (action){
+            case 2:
+                cout << split[ii] << endl;
+                break;
+            case 3:
+                hashed = hasher(split[ii]);
+                get(split[ii], hashed, 3);
+            }
+        }
 		if (action == 3){
 			keys->size = 0;
 			for (int ii=0;ii<10000;++ii)
@@ -155,25 +153,13 @@ void handleKeys(string key, int action){
 
 	//remove single key
 	case 4:
-		vector<char> v;
-		int len;
-		for (int ii=0;ii<=keys->size;++ii){
-			if (keys->list[ii] == 0 && S != ""){
-				if (S == key){
-					len = S.length();
-					for (int ij=0;ij<len;++ij)
-						v.pop_back();
-					S = "";
-				}
-			}
-			v.push_back(keys->list[ii]);
-			S += keys->list[ii];
-		}
-		for (int ii=0;ii<keys->size;++ii)
-			keys->list[ii] = 0;
-		keys->size -= len;
-		for (int ii=0;ii<v.size();++ii)
-			keys->list[ii] = v[ii];
+        string S = "";
+        for (int ii=0; ii<split.size(); ii++)
+            if (split[ii] != key && split[ii] != "") S += (split[ii] + ":");
+        for (int ii=0;ii<10000;++ii)
+            keys->list[ii] = 0;
+        auto cs = S.c_str(); i=0;
+        strncpy(keys->list, cs, 10000);
 	}
 	shmdt(keys);
 }
@@ -184,11 +170,9 @@ int main(int argc, char**argv){
 	hash<string> hasher;
 
 	if (argc == 2 && string(argv[1]) == "clear") {
-		cerr << "clearing values\n";
 		handleKeys("",3);
 		exit(0);
 	} else if (argc == 2 && string(argv[1]) == "show") {
-		cerr << "listing values:\n";
 		handleKeys("",2);
 		exit(0);
 	} else if (argc == 3) {
