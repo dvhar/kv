@@ -1,36 +1,65 @@
-#include <vector>
+#include <list>
 #include <iostream>
 #include <functional>
 #include <sys/shm.h>
 #include <sys/ipc.h>
 #include <unistd.h>
 #include <boost/algorithm/string.hpp>
+#define metaShmKey 875784987
+#define chunksize 8192
+#define listsize 10000
 using namespace std;
 
-int metaKey; //shm key for list of all keys
+enum { ADD, UPDATE, SHOW, DELETE, CLEAR, GET, POP, CHECK };
 void handleKeys(string, int);
+typedef struct chunk {
+	int size;
+	byte data[chunksize];
+} chunk ;
+typedef struct metadata {
+	int size;
+	char list[listsize];
+} metadata ;
 
-void set(string key, vector<byte> v, int size, int hashed, int action){
+void set(string key, list<chunk> chunks, int size, int hashed, int action){
 	int sizeId, dataId, *sizePtr;
 	byte* dataPtr;
 
 	//set if empty
-	if (action == 0){
+	if (action == ADD){
 		sizeId = shmget(hashed, 2*sizeof(int), IPC_EXCL | IPC_CREAT | 0666);
-		if (sizeId<0) {cerr<<"key unavailable\n";exit(1);}
+		if (sizeId<0) {
+			perror("key unavailable");
+			exit(1);
+		}
 		dataId = shmget(hashed+1, size, IPC_EXCL | IPC_CREAT | 0666);
-		if (dataId<0) {cerr<<"key  unavailable\n";exit(1);}
+		if (dataId<0) {
+			perror("key unavailable");
+			exit(1);
+		}
 		sizePtr = (int*) shmat(sizeId, NULL, 0);
-		if (sizePtr==(void*)-1) {cerr<<"metadata error\n";exit(1);}
+		if (sizePtr==(void*)-1) {
+			perror("metadata error");
+			exit(1);
+		}
 		dataPtr = (byte*) shmat(dataId, NULL, 0);
-		if (dataPtr==(void*)-1) {cerr<<"data error\n";exit(1);}
+		if (dataPtr==(void*)-1) {
+			perror("data error");
+			exit(1);
+		}
 
 	//set even if not empty
 	} else {
 		sizeId = shmget(hashed, 2*sizeof(int), IPC_CREAT | 0666);
-		if (sizeId<0) {perror("key error");exit(1);}
+		if (sizeId<0) {
+			perror("key error");
+			exit(1);
+		}
 		sizePtr = (int*) shmat(sizeId, NULL, 0);
-		if (sizePtr==(void*)-1) {perror("metadata error");exit(1);}
+		if (sizePtr==(void*)-1) {
+			perror("metadata error");
+			exit(1);
+		}
 		dataId = shmget(hashed+1, size, IPC_EXCL | IPC_CREAT | 0666);
 		//delete old one if necessary
 		if (dataId<0) {
@@ -39,26 +68,32 @@ void set(string key, vector<byte> v, int size, int hashed, int action){
 			shmdt(dataPtr);
 			shmctl(dataId, IPC_RMID, NULL);
 			dataId = shmget(hashed+1, size, IPC_CREAT | IPC_EXCL | 0666);
-			if (dataId<0) {perror("key error");exit(1);}
+			if (dataId<0) {
+				perror("key error");
+				exit(1);
+			}
 		}
 		dataPtr = (byte*) shmat(dataId, NULL, 0);
-		if (dataPtr==(void*)-1) {perror("data error");exit(1);}
+		if (dataPtr==(void*)-1) {
+			perror("data error");
+			exit(1);
+		}
 	}
 	sizePtr[0] = hashed;
 	sizePtr[1] = size;
-	for (int ii=0;ii<size;++ii)
-		dataPtr[ii] = v[ii];
-	handleKeys(key, 1);
-
+	int ii=0;
+	for (list<chunk>::iterator it=chunks.begin(); it!=chunks.end(); ii+=it->size, ++it)
+		memcpy(dataPtr+ii, it->data, it->size);
+	handleKeys(key, ADD);
 	shmdt(sizePtr);
 	shmdt(dataPtr);
 }
 
 void get(string key, int hashed, int action){
 	int sizeId = shmget(hashed, 2*sizeof(int), 0);
-	if (sizeId<0) {cerr<<"key unused\n";return;}
+	if (sizeId<0) {cerr << "key unused\n"; return;}
 	int *sizePtr = (int*) shmat(sizeId, NULL, 0);
-	if (sizePtr==(void*)-1) {cerr<<"metadata error\n";exit(1);}
+	if (sizePtr==(void*)-1) {cerr << "metadata error\n"; exit(1);}
 	if (sizePtr[0] != hashed){
 		cerr << key << "key unused\n";
 		shmctl(sizeId, IPC_RMID, NULL);
@@ -67,100 +102,104 @@ void get(string key, int hashed, int action){
 	int size = sizePtr[1];
 
 	//checking presence and size
-	if (action == 2){
+	if (action == CHECK){
 		cout << size << endl;
 		exit(0);
 	}
 
 	int dataId = shmget(hashed+1, size, 0);
-	if (dataId<0) {cerr<<"metadata error\n";exit(1);}
+	if (dataId<0) {
+		perror("metadata error");
+		exit(1);
+	}
 	byte *dataPtr = (byte*) shmat(dataId, NULL, 0);
-	if (dataPtr==(void*)-1) {cerr<<"data error\n";exit(1);}
+	if (dataPtr==(void*)-1) {
+		perror("data error");
+		exit(1);
+	}
 
 	//retrieve value
-	if (action < 2)
-		//for (int ii=0;ii<size;++ii)
-            //write(1, dataPtr+ii, 1);
+	if (action == GET || action == POP)
             write(1, dataPtr, size);
 	shmdt(sizePtr);
 	shmdt(dataPtr);
 
 	//delete
-	if (action==1 || action==3){
+	if (action == DELETE || action == POP){
 		shmctl(sizeId, IPC_RMID, NULL);
 		shmctl(dataId, IPC_RMID, NULL);
 	}
 }
 
-typedef struct metadata {
-	int size;
-	char list[10000];
-} metadata ;
+vector<string> splitter(char* input) {
+    vector<string> split;
+    string text = string(input);
+    if (text.length()>0) text.pop_back();
+    boost::split(split, text, [](char c){return c == ':';});
+	return split;
+}
+
 void handleKeys(string key, int action){
-	int metaId = shmget(875784987, 10016, IPC_EXCL | IPC_CREAT | 0666);
+	//attach to metadata
+	int metaId = shmget(metaShmKey, 10016, IPC_EXCL | IPC_CREAT | 0666);
 	int init = 0;
 	if (metaId<0) {
-		metaId = shmget(875784987, 10016, 0);
+		metaId = shmget(metaShmKey, 10016, 0);
 		if (metaId<0) {cerr<<"metakey error\n";exit(1);}
 	} else { init = 1; }
 	metadata *keys = (metadata*) shmat(metaId, NULL, 0);
 	if (keys==(void*)-1) {cerr<<"metakey list error\n";exit(1);}
 	hash<string> hasher;
 	int hashed;
+    int i=0;
+    vector<string> split;
 
 	//initialize
 	if (init) {
 		keys->size = 0;
-		for (int ii=0;ii<10000;++ii)
-			keys->list[ii] = 0;
+		memset(keys->list, 0, listsize);
 	}
 
-	//insert, list, remove
-    int i=0;
-    vector<string> split;
-    string text = string(keys->list);
-    if (text.length()>0) text.pop_back();
-    boost::split(split, text, [](char c){return c == ':';});
 	switch (action) {
 
 	//add key
-	case 1:
-	for (i=0;keys->list[i]!=0;i++);
-	for (int ii=0; ii<key.length(); ii++)
-		keys->list[i++] = key.at(ii);
-    keys->list[i++] = ':';
-	break;
+	case ADD:
+		i = strlen(keys->list);
+		if (i + key.length() > 9999) {
+			cerr << "no more key space\n";
+			exit(1);
+		}
+		sprintf(keys->list+i, (key+":").c_str());
+		break;
 
 	//list or delete all keys
-	case 2:
-	case 3:
-		for (int ii=0; ii<split.size(); ii++){
+	case SHOW:
+	case CLEAR:
+		split = splitter(keys->list);
+		for (unsigned int ii=0; ii<split.size(); ii++){
             if (split[ii] == "") continue;
             switch (action){
-            case 2:
+            case SHOW:
                 cout << split[ii] << endl;
                 break;
-            case 3:
+            case CLEAR:
                 hashed = hasher(split[ii]);
                 get(split[ii], hashed, 3);
             }
         }
-		if (action == 3){
+		if (action == CLEAR){
 			keys->size = 0;
-			for (int ii=0;ii<10000;++ii)
-				keys->list[ii] = 0;
+			memset(keys->list, 0, listsize);
 		}
 		break;
 
 	//remove single key
-	case 4:
+	case DELETE:
+		split = splitter(keys->list);
         string S = "";
-        for (int ii=0; ii<split.size(); ii++)
+        for (unsigned int ii=0; ii<split.size(); ii++)
             if (split[ii] != key && split[ii] != "") S += (split[ii] + ":");
-        for (int ii=0;ii<10000;++ii)
-            keys->list[ii] = 0;
-        auto cs = S.c_str(); i=0;
-        strncpy(keys->list, cs, 10000);
+        strncpy(keys->list, S.c_str(), listsize);
 	}
 	shmdt(keys);
 }
@@ -168,13 +207,15 @@ void handleKeys(string key, int action){
 int main(int argc, char**argv){
 	string key, command;
 	vector<byte> v;
+	list<chunk> chunks;
 	hash<string> hasher;
+	int size;
 
 	if (argc == 2 && string(argv[1]) == "clear") {
-		handleKeys("",3);
+		handleKeys("",CLEAR);
 		exit(0);
 	} else if (argc == 2 && string(argv[1]) == "show") {
-		handleKeys("",2);
+		handleKeys("",SHOW);
 		exit(0);
 	} else if (argc == 3) {
 		command = string(argv[1]);
@@ -185,31 +226,34 @@ int main(int argc, char**argv){
 		exit(1);
 	}
 	int hashed = hasher(key);
-	metaKey = ftok(argv[0], 1);
 	
-	//put data from stdin into a vector
+	//put data from stdin into a linked list
 	if (!isatty(0)){
-		char buf[1];
+		char buf[chunksize];
 		long n;
-		while(n=read(0,buf,(long)sizeof(buf))>0)
-			v.push_back((byte)buf[0]);
+		chunk temp;
+		while((n = read(0,buf,(long)sizeof(buf))) > 0){
+			temp.size = n;
+			size += n;
+			memcpy(temp.data, buf, n);
+			chunks.push_back(temp);
+		}
 	}
 
 	//run command
-	int size = v.size();
 	if (command == "set" || command == "up") {
-		int action;
-		if (command == "up") action = 1;
-		set(key, v, size, hashed, action);
+		int action = ADD;
+		if (command == "up") action = UPDATE;
+		set(key, chunks, size, hashed, action);
 	} else if (command == "get" || command == "pop" || command == "del" || command == "chk") {
 		int action;
-		if (command == "get") action = 0;
-		if (command == "pop") action = 1;
-		if (command == "chk") action = 2;
-		if (command == "del") action = 3;
+		if (command == "get") action = GET;
+		if (command == "pop") action = POP;
+		if (command == "chk") action = CHECK;
+		if (command == "del") action = DELETE;
 		get(key, hashed, action);
-		if (action == 1 || action == 3)
-			handleKeys(key, 4);
+		if (action == POP || action == DELETE)
+			handleKeys(key, DELETE);
 	} else {
 		cerr << "Invalid command: " << command << endl;
 		exit(1);
