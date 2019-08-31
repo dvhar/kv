@@ -8,7 +8,7 @@
 #include <boost/algorithm/string.hpp>
 #define metaShmKey 875784987
 #define chunksize 8192
-#define listsize 10000
+#define keylistsize 10000
 using namespace std;
 
 enum { SET, UPDATE, SHOW, DELETE, CLEAR, GET, POP, CHECK };
@@ -18,8 +18,7 @@ typedef struct chunk {
 	byte data[chunksize];
 } chunk ;
 typedef struct metadata {
-	int size;
-	char list[listsize];
+	char keylist[keylistsize];
 } metadata ;
 map<string, int> commands = {
 	{"get", GET},
@@ -33,25 +32,15 @@ map<string, int> commands = {
 };
 
 void setVal(string key, list<chunk> chunks, int size, int hashed, int action){
-	int sizeId, dataId, *sizePtr;
+	int dataId;
 	bool newkey = true;
 	byte* dataPtr;
 
 	//set if empty
 	if (action == SET){
-		sizeId = shmget(hashed, 2*sizeof(int), IPC_EXCL | IPC_CREAT | 0666);
-		if (sizeId<0) {
-			perror("key unavailable");
-			exit(1);
-		}
-		dataId = shmget(hashed+1, size, IPC_EXCL | IPC_CREAT | 0666);
+		dataId = shmget(hashed, size, IPC_EXCL | IPC_CREAT | 0666);
 		if (dataId<0) {
 			perror("key unavailable");
-			exit(1);
-		}
-		sizePtr = (int*) shmat(sizeId, NULL, 0);
-		if (sizePtr==(void*)-1) {
-			perror("metadata error");
 			exit(1);
 		}
 		dataPtr = (byte*) shmat(dataId, NULL, 0);
@@ -62,25 +51,15 @@ void setVal(string key, list<chunk> chunks, int size, int hashed, int action){
 
 	//set even if not empty
 	} else {
-		sizeId = shmget(hashed, 2*sizeof(int), IPC_CREAT | 0666);
-		if (sizeId<0) {
-			perror("key error");
-			exit(1);
-		}
-		sizePtr = (int*) shmat(sizeId, NULL, 0);
-		if (sizePtr==(void*)-1) {
-			perror("metadata error");
-			exit(1);
-		}
-		dataId = shmget(hashed+1, size, IPC_EXCL | IPC_CREAT | 0666);
+		dataId = shmget(hashed, size, IPC_EXCL | IPC_CREAT | 0666);
 		//delete old one if necessary
 		if (dataId<0) {
 			newkey = false;
-			dataId = shmget(hashed+1, sizePtr[1], IPC_CREAT | 0666);
+			dataId = shmget(hashed, 0, 0);
 			dataPtr = (byte*) shmat(dataId, NULL, 0);
 			shmdt(dataPtr);
 			shmctl(dataId, IPC_RMID, NULL);
-			dataId = shmget(hashed+1, size, IPC_CREAT | IPC_EXCL | 0666);
+			dataId = shmget(hashed, size, IPC_CREAT | IPC_EXCL | 0666);
 			if (dataId<0) {
 				perror("key error");
 				exit(1);
@@ -92,46 +71,29 @@ void setVal(string key, list<chunk> chunks, int size, int hashed, int action){
 			exit(1);
 		}
 	}
-	sizePtr[0] = hashed;
-	sizePtr[1] = size;
 	int ii=0;
 	for (list<chunk>::iterator it=chunks.begin(); it!=chunks.end(); ii+=it->size, ++it)
 		memcpy(dataPtr+ii, it->data, it->size);
 	if (newkey)
 		handleKeys(key, SET);
-	shmdt(sizePtr);
 	shmdt(dataPtr);
 }
 
 void getVal(string key, int hashed, int action){
-	int sizeId = shmget(hashed, 2*sizeof(int), 0);
-	if (sizeId<0) {
-		cerr << "key unused\n";
+	int dataId = shmget(hashed, 0, 0);
+	if (dataId<0) {
+		perror("key error");
 		exit(1);
 	}
-	int *sizePtr = (int*) shmat(sizeId, NULL, 0);
-	if (sizePtr==(void*)-1) {
-		cerr << "metadata error\n";
-		exit(1);
-	}
-	if (sizePtr[0] != hashed){
-		cerr << key << "key unused\n";
-		shmctl(sizeId, IPC_RMID, NULL);
-		return;
-	}
-	int size = sizePtr[1];
+	shmid_ds info;
+	shmctl(dataId, IPC_STAT, &info);
 
 	//return size if checking
 	if (action == CHECK){
-		cout << size << endl;
+		cout << info.shm_segsz << endl;
 		exit(0);
 	}
 
-	int dataId = shmget(hashed+1, size, 0);
-	if (dataId<0) {
-		perror("metadata error");
-		exit(1);
-	}
 	byte *dataPtr = (byte*) shmat(dataId, NULL, 0);
 	if (dataPtr==(void*)-1) {
 		perror("data error");
@@ -140,13 +102,11 @@ void getVal(string key, int hashed, int action){
 
 	//retrieve value
 	if (action == GET || action == POP)
-			write(1, dataPtr, size);
-	shmdt(sizePtr);
+			write(1, dataPtr, info.shm_segsz);
 	shmdt(dataPtr);
 
 	//delete
 	if (action == DELETE || action == POP){
-		shmctl(sizeId, IPC_RMID, NULL);
 		shmctl(dataId, IPC_RMID, NULL);
 		handleKeys(key, DELETE);
 	}
@@ -162,10 +122,10 @@ vector<string> splitter(char* input) {
 
 void handleKeys(string key, int action){
 	//attach to metadata
-	int metaId = shmget(metaShmKey, 10016, IPC_EXCL | IPC_CREAT | 0666);
+	int metaId = shmget(metaShmKey, sizeof(metadata), IPC_EXCL | IPC_CREAT | 0666);
 	int init = 0;
 	if (metaId<0) {
-		metaId = shmget(metaShmKey, 10016, 0);
+		metaId = shmget(metaShmKey, sizeof(metadata), 0);
 		if (metaId<0) {
 			cerr<<"metakey error\n";
 			exit(1);
@@ -185,26 +145,25 @@ void handleKeys(string key, int action){
 
 	//initialize
 	if (init) {
-		keys->size = 0;
-		memset(keys->list, 0, listsize);
+		memset(keys->keylist, 0, keylistsize);
 	}
 
 	switch (action) {
 
 	//add key
 	case SET:
-		i = strlen(keys->list);
-		if (i + key.length() >= listsize) {
+		i = strlen(keys->keylist);
+		if (i + key.length() >= keylistsize) {
 			cerr << "no more key space\n";
 			exit(1);
 		}
-		sprintf(keys->list+i, "%s", (key+":").c_str());
+		sprintf(keys->keylist+i, "%s", (key+":").c_str());
 		break;
 
 	//list or delete all keys
 	case SHOW:
 	case CLEAR:
-		split = splitter(keys->list);
+		split = splitter(keys->keylist);
 		for (uint ii=0; ii<split.size(); ii++){
 			if (split[ii] == "") continue;
 			switch (action){
@@ -213,22 +172,20 @@ void handleKeys(string key, int action){
 				break;
 			case CLEAR:
 				hashed = hasher(split[ii]);
-				getVal(split[ii], hashed, 3);
+				getVal(split[ii], hashed, DELETE);
 			}
 		}
-		if (action == CLEAR){
-			keys->size = 0;
-			memset(keys->list, 0, listsize);
-		}
+		if (action == CLEAR)
+			memset(keys->keylist, 0, keylistsize);
 		break;
 
 	//remove single key
 	case DELETE:
-		split = splitter(keys->list);
+		split = splitter(keys->keylist);
 		string S("");
 		for (uint ii=0; ii<split.size(); ii++)
 			if (split[ii] != key) S += (split[ii] + ":");
-		strncpy(keys->list, S.c_str(), listsize);
+		strncpy(keys->keylist, S.c_str(), keylistsize);
 	}
 	shmdt(keys);
 }
@@ -238,18 +195,18 @@ int main(int argc, char**argv){
 	list<chunk> chunks;
 	hash<string> hasher;
 
-	if (argc == 2 && string(argv[1]) == "clear") {
+	if (argc > 1) command = string(argv[1]);
+	if (argc == 2 && command == "clear") {
 		handleKeys("",CLEAR);
 		exit(0);
-	} else if (argc == 2 && string(argv[1]) == "show") {
+	} else if (argc == 2 && command == "show") {
 		handleKeys("",SHOW);
 		exit(0);
 	} else if (argc == 3) {
-		command = string(argv[1]);
 		key = string(argv[2]);
 	} else{
 		cerr << "usage: " << argv[0] << " <set | get | pop | up | chk | del | clear> <key>\n"
-			 << "	   When using set or up, pipe input to stdin\n";
+			 << "	   When using set or up, send input to stdin\n";
 		exit(1);
 	}
 
