@@ -1,4 +1,4 @@
 all: mpipe
 
-mpipe: shmstore.cpp
+mpipe: mpipe.cpp
 	g++ --std=c++2a -Wall $^ -o mpipe

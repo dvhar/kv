@@ -120,7 +120,7 @@ void get(string key, int hashed, int action){
 
 	//retrieve value
 	if (action == GET || action == POP)
-            write(1, dataPtr, size);
+			write(1, dataPtr, size);
 	shmdt(sizePtr);
 	shmdt(dataPtr);
 
@@ -128,14 +128,15 @@ void get(string key, int hashed, int action){
 	if (action == DELETE || action == POP){
 		shmctl(sizeId, IPC_RMID, NULL);
 		shmctl(dataId, IPC_RMID, NULL);
+		handleKeys(key, DELETE);
 	}
 }
 
 vector<string> splitter(char* input) {
-    vector<string> split;
-    string text = string(input);
-    if (text.length()>0) text.pop_back();
-    boost::split(split, text, [](char c){return c == ':';});
+	vector<string> split;
+	string text = string(input);
+	if (text.length()>0) text.pop_back();
+	boost::split(split, text, [](char c){return c == ':';});
 	return split;
 }
 
@@ -151,8 +152,8 @@ void handleKeys(string key, int action){
 	if (keys==(void*)-1) {cerr<<"metakey list error\n";exit(1);}
 	hash<string> hasher;
 	int hashed;
-    int i=0;
-    vector<string> split;
+	int i=0;
+	vector<string> split;
 
 	//initialize
 	if (init) {
@@ -177,16 +178,16 @@ void handleKeys(string key, int action){
 	case CLEAR:
 		split = splitter(keys->list);
 		for (unsigned int ii=0; ii<split.size(); ii++){
-            if (split[ii] == "") continue;
-            switch (action){
-            case SHOW:
-                cout << split[ii] << endl;
-                break;
-            case CLEAR:
-                hashed = hasher(split[ii]);
-                get(split[ii], hashed, 3);
-            }
-        }
+			if (split[ii] == "") continue;
+			switch (action){
+			case SHOW:
+				cout << split[ii] << endl;
+				break;
+			case CLEAR:
+				hashed = hasher(split[ii]);
+				get(split[ii], hashed, 3);
+			}
+		}
 		if (action == CLEAR){
 			keys->size = 0;
 			memset(keys->list, 0, listsize);
@@ -196,10 +197,10 @@ void handleKeys(string key, int action){
 	//remove single key
 	case DELETE:
 		split = splitter(keys->list);
-        string S = "";
-        for (unsigned int ii=0; ii<split.size(); ii++)
-            if (split[ii] != key && split[ii] != "") S += (split[ii] + ":");
-        strncpy(keys->list, S.c_str(), listsize);
+		string S = "";
+		for (unsigned int ii=0; ii<split.size(); ii++)
+			if (split[ii] != key && split[ii] != "") S += (split[ii] + ":");
+		strncpy(keys->list, S.c_str(), listsize);
 	}
 	shmdt(keys);
 }
@@ -222,7 +223,7 @@ int main(int argc, char**argv){
 		key = string(argv[2]);
 	} else{
 		cerr << "usage: " << argv[0] << " <set | get | pop | up | chk | del | clear> <key>\n"
-			 << "       When using set or up, pipe input to stdin\n";
+			 << "	   When using set or up, pipe input to stdin\n";
 		exit(1);
 	}
 	int hashed = hasher(key);
@@ -252,8 +253,6 @@ int main(int argc, char**argv){
 		if (command == "chk") action = CHECK;
 		if (command == "del") action = DELETE;
 		get(key, hashed, action);
-		if (action == POP || action == DELETE)
-			handleKeys(key, DELETE);
 	} else {
 		cerr << "Invalid command: " << command << endl;
 		exit(1);
