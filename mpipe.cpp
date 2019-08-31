@@ -32,8 +32,9 @@ map<string, int> commands = {
 	{"chk", CHECK}
 };
 
-void set(string key, list<chunk> chunks, int size, int hashed, int action){
+void setVal(string key, list<chunk> chunks, int size, int hashed, int action){
 	int sizeId, dataId, *sizePtr;
+	bool newkey = true;
 	byte* dataPtr;
 
 	//set if empty
@@ -74,6 +75,7 @@ void set(string key, list<chunk> chunks, int size, int hashed, int action){
 		dataId = shmget(hashed+1, size, IPC_EXCL | IPC_CREAT | 0666);
 		//delete old one if necessary
 		if (dataId<0) {
+			newkey = false;
 			dataId = shmget(hashed+1, sizePtr[1], IPC_CREAT | 0666);
 			dataPtr = (byte*) shmat(dataId, NULL, 0);
 			shmdt(dataPtr);
@@ -95,12 +97,13 @@ void set(string key, list<chunk> chunks, int size, int hashed, int action){
 	int ii=0;
 	for (list<chunk>::iterator it=chunks.begin(); it!=chunks.end(); ii+=it->size, ++it)
 		memcpy(dataPtr+ii, it->data, it->size);
-	handleKeys(key, SET);
+	if (newkey)
+		handleKeys(key, SET);
 	shmdt(sizePtr);
 	shmdt(dataPtr);
 }
 
-void get(string key, int hashed, int action){
+void getVal(string key, int hashed, int action){
 	int sizeId = shmget(hashed, 2*sizeof(int), 0);
 	if (sizeId<0) {
 		cerr << "key unused\n";
@@ -163,10 +166,18 @@ void handleKeys(string key, int action){
 	int init = 0;
 	if (metaId<0) {
 		metaId = shmget(metaShmKey, 10016, 0);
-		if (metaId<0) {cerr<<"metakey error\n";exit(1);}
-	} else { init = 1; }
+		if (metaId<0) {
+			cerr<<"metakey error\n";
+			exit(1);
+		}
+	} else {
+		init = 1;
+	}
 	metadata *keys = (metadata*) shmat(metaId, NULL, 0);
-	if (keys==(void*)-1) {cerr<<"metakey list error\n";exit(1);}
+	if (keys==(void*)-1) {
+		cerr<<"metakey list error\n";
+		exit(1);
+	}
 	hash<string> hasher;
 	int hashed;
 	int i=0;
@@ -183,11 +194,11 @@ void handleKeys(string key, int action){
 	//add key
 	case SET:
 		i = strlen(keys->list);
-		if (i + key.length() > 9999) {
+		if (i + key.length() >= listsize) {
 			cerr << "no more key space\n";
 			exit(1);
 		}
-		sprintf(keys->list+i, (key+":").c_str());
+		sprintf(keys->list+i, "%s", (key+":").c_str());
 		break;
 
 	//list or delete all keys
@@ -202,7 +213,7 @@ void handleKeys(string key, int action){
 				break;
 			case CLEAR:
 				hashed = hasher(split[ii]);
-				get(split[ii], hashed, 3);
+				getVal(split[ii], hashed, 3);
 			}
 		}
 		if (action == CLEAR){
@@ -242,8 +253,10 @@ int main(int argc, char**argv){
 		exit(1);
 	}
 
-	int hashed = hasher(key);
-	int action = commands[command];
+	int hashed = hasher(key),
+		action = commands[command],
+		size = 0;
+
 	switch (action){
 		case SET:
 		case UPDATE:
@@ -251,19 +264,18 @@ int main(int argc, char**argv){
 				cerr << "key cannot contain ':'\n";
 				exit(1);
 			}
-			int size;
 			chunk temp;
 			while((temp.size = read(0, temp.data, sizeof(temp.data))) > 0){
 				size += temp.size;
 				chunks.push_back(temp);
 			}
-			set(key, chunks, size, hashed, action);
+			setVal(key, chunks, size, hashed, action);
 			break;
 		case GET:
 		case POP:
 		case CHECK:
 		case DELETE:
-			get(key, hashed, action);
+			getVal(key, hashed, action);
 			break;
 		default:
 			cerr << "Invalid command: " << command << endl;
