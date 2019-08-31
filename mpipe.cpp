@@ -251,13 +251,10 @@ int main(int argc, char**argv){
 				cerr << "key cannot contain ':'\n";
 				exit(1);
 			}
-			char buf[chunksize];
-			int n, size;
+			int size;
 			chunk temp;
-			while((n = read(0,buf,(long)sizeof(buf))) > 0){
-				temp.size = n;
-				size += n;
-				memcpy(temp.data, buf, n);
+			while((temp.size = read(0, temp.data, sizeof(temp.data))) > 0){
+				size += temp.size;
 				chunks.push_back(temp);
 			}
 			set(key, chunks, size, hashed, action);
