@@ -177,7 +177,7 @@ void handleKeys(string key, int action){
 	case SHOW:
 	case CLEAR:
 		split = splitter(keys->list);
-		for (unsigned int ii=0; ii<split.size(); ii++){
+		for (uint ii=0; ii<split.size(); ii++){
 			if (split[ii] == "") continue;
 			switch (action){
 			case SHOW:
@@ -197,9 +197,9 @@ void handleKeys(string key, int action){
 	//remove single key
 	case DELETE:
 		split = splitter(keys->list);
-		string S = "";
-		for (unsigned int ii=0; ii<split.size(); ii++)
-			if (split[ii] != key && split[ii] != "") S += (split[ii] + ":");
+		string S("");
+		for (uint ii=0; ii<split.size(); ii++)
+			if (split[ii] != key) S += (split[ii] + ":");
 		strncpy(keys->list, S.c_str(), listsize);
 	}
 	shmdt(keys);
@@ -243,6 +243,10 @@ int main(int argc, char**argv){
 
 	//run command
 	if (command == "set" || command == "up") {
+		if (key.find(':') != string::npos) {
+			cerr << "key cannot contain ':'\n";
+			exit(1);
+		}
 		int action = ADD;
 		if (command == "up") action = UPDATE;
 		set(key, chunks, size, hashed, action);
