@@ -1,4 +1,5 @@
 #include <list>
+#include <map>
 #include <iostream>
 #include <functional>
 #include <sys/shm.h>
@@ -10,7 +11,7 @@
 #define listsize 10000
 using namespace std;
 
-enum { ADD, UPDATE, SHOW, DELETE, CLEAR, GET, POP, CHECK };
+enum { SET, UPDATE, SHOW, DELETE, CLEAR, GET, POP, CHECK };
 void handleKeys(string, int);
 typedef struct chunk {
 	int size;
@@ -20,13 +21,23 @@ typedef struct metadata {
 	int size;
 	char list[listsize];
 } metadata ;
+map<string, int> commands = {
+	{"get", GET},
+	{"set", SET},
+	{"pop", POP},
+	{"up", UPDATE},
+	{"show", SHOW},
+	{"del", DELETE},
+	{"clear", CLEAR},
+	{"chk", CHECK}
+};
 
 void set(string key, list<chunk> chunks, int size, int hashed, int action){
 	int sizeId, dataId, *sizePtr;
 	byte* dataPtr;
 
 	//set if empty
-	if (action == ADD){
+	if (action == SET){
 		sizeId = shmget(hashed, 2*sizeof(int), IPC_EXCL | IPC_CREAT | 0666);
 		if (sizeId<0) {
 			perror("key unavailable");
@@ -84,16 +95,22 @@ void set(string key, list<chunk> chunks, int size, int hashed, int action){
 	int ii=0;
 	for (list<chunk>::iterator it=chunks.begin(); it!=chunks.end(); ii+=it->size, ++it)
 		memcpy(dataPtr+ii, it->data, it->size);
-	handleKeys(key, ADD);
+	handleKeys(key, SET);
 	shmdt(sizePtr);
 	shmdt(dataPtr);
 }
 
 void get(string key, int hashed, int action){
 	int sizeId = shmget(hashed, 2*sizeof(int), 0);
-	if (sizeId<0) {cerr << "key unused\n"; return;}
+	if (sizeId<0) {
+		cerr << "key unused\n";
+		exit(1);
+	}
 	int *sizePtr = (int*) shmat(sizeId, NULL, 0);
-	if (sizePtr==(void*)-1) {cerr << "metadata error\n"; exit(1);}
+	if (sizePtr==(void*)-1) {
+		cerr << "metadata error\n";
+		exit(1);
+	}
 	if (sizePtr[0] != hashed){
 		cerr << key << "key unused\n";
 		shmctl(sizeId, IPC_RMID, NULL);
@@ -101,7 +118,7 @@ void get(string key, int hashed, int action){
 	}
 	int size = sizePtr[1];
 
-	//checking presence and size
+	//return size if checking
 	if (action == CHECK){
 		cout << size << endl;
 		exit(0);
@@ -164,7 +181,7 @@ void handleKeys(string key, int action){
 	switch (action) {
 
 	//add key
-	case ADD:
+	case SET:
 		i = strlen(keys->list);
 		if (i + key.length() > 9999) {
 			cerr << "no more key space\n";
@@ -207,10 +224,8 @@ void handleKeys(string key, int action){
 
 int main(int argc, char**argv){
 	string key, command;
-	vector<byte> v;
 	list<chunk> chunks;
 	hash<string> hasher;
-	int size;
 
 	if (argc == 2 && string(argv[1]) == "clear") {
 		handleKeys("",CLEAR);
@@ -226,40 +241,37 @@ int main(int argc, char**argv){
 			 << "	   When using set or up, pipe input to stdin\n";
 		exit(1);
 	}
-	int hashed = hasher(key);
-	
-	//put data from stdin into a linked list
-	if (!isatty(0)){
-		char buf[chunksize];
-		long n;
-		chunk temp;
-		while((n = read(0,buf,(long)sizeof(buf))) > 0){
-			temp.size = n;
-			size += n;
-			memcpy(temp.data, buf, n);
-			chunks.push_back(temp);
-		}
-	}
 
-	//run command
-	if (command == "set" || command == "up") {
-		if (key.find(':') != string::npos) {
-			cerr << "key cannot contain ':'\n";
+	int hashed = hasher(key);
+	int action = commands[command];
+	switch (action){
+		case SET:
+		case UPDATE:
+			if (key.find(':') != string::npos) {
+				cerr << "key cannot contain ':'\n";
+				exit(1);
+			}
+			char buf[chunksize];
+			int n, size;
+			chunk temp;
+			while((n = read(0,buf,(long)sizeof(buf))) > 0){
+				temp.size = n;
+				size += n;
+				memcpy(temp.data, buf, n);
+				chunks.push_back(temp);
+			}
+			set(key, chunks, size, hashed, action);
+			break;
+		case GET:
+		case POP:
+		case CHECK:
+		case DELETE:
+			get(key, hashed, action);
+			break;
+		default:
+			cerr << "Invalid command: " << command << endl;
 			exit(1);
-		}
-		int action = ADD;
-		if (command == "up") action = UPDATE;
-		set(key, chunks, size, hashed, action);
-	} else if (command == "get" || command == "pop" || command == "del" || command == "chk") {
-		int action;
-		if (command == "get") action = GET;
-		if (command == "pop") action = POP;
-		if (command == "chk") action = CHECK;
-		if (command == "del") action = DELETE;
-		get(key, hashed, action);
-	} else {
-		cerr << "Invalid command: " << command << endl;
-		exit(1);
+			break;
 	}
 	return 0;
 }
