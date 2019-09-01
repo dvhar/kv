@@ -32,44 +32,32 @@ map<string, int> commands = {
 };
 
 void setVal(string key, list<chunk> chunks, int size, int hashed, int action){
-	int dataId;
 	bool newkey = true;
 	byte* dataPtr;
-
+	int dataId = shmget(hashed, size, IPC_EXCL | IPC_CREAT | 0666);
 	//set if empty
-	if (action == SET){
-		dataId = shmget(hashed, size, IPC_EXCL | IPC_CREAT | 0666);
-		if (dataId<0) {
-			perror("key unavailable");
-			exit(1);
-		}
-		dataPtr = (byte*) shmat(dataId, NULL, 0);
-		if (dataPtr==(void*)-1) {
-			perror("data error");
-			exit(1);
-		}
+	if (action == SET && dataId < 0){
+		perror("key unavailable");
+		exit(1);
 
 	//set even if not empty
-	} else {
-		dataId = shmget(hashed, size, IPC_EXCL | IPC_CREAT | 0666);
-		//delete old one if necessary
-		if (dataId<0) {
-			newkey = false;
-			dataId = shmget(hashed, 0, 0);
-			dataPtr = (byte*) shmat(dataId, NULL, 0);
-			shmdt(dataPtr);
-			shmctl(dataId, IPC_RMID, NULL);
-			dataId = shmget(hashed, size, IPC_CREAT | IPC_EXCL | 0666);
-			if (dataId<0) {
-				perror("key error");
-				exit(1);
-			}
-		}
+	} else if (action == UPDATE && dataId < 0) {
+		newkey = false;
+		dataId = shmget(hashed, 0, 0);
 		dataPtr = (byte*) shmat(dataId, NULL, 0);
-		if (dataPtr==(void*)-1) {
-			perror("data error");
+		shmdt(dataPtr);
+		shmctl(dataId, IPC_RMID, NULL);
+		dataId = shmget(hashed, size, IPC_CREAT | IPC_EXCL | 0666);
+		if (dataId<0) {
+			perror("key error");
 			exit(1);
 		}
+	}
+
+	dataPtr = (byte*) shmat(dataId, NULL, 0);
+	if (dataPtr==(void*)-1) {
+		perror("data access error");
+		exit(1);
 	}
 	int ii=0;
 	for (list<chunk>::iterator it=chunks.begin(); it!=chunks.end(); ii+=it->size, ++it)
@@ -144,9 +132,8 @@ void handleKeys(string key, int action){
 	vector<string> split;
 
 	//initialize
-	if (init) {
+	if (init)
 		memset(keys->keylist, 0, keylistsize);
-	}
 
 	switch (action) {
 
@@ -157,7 +144,7 @@ void handleKeys(string key, int action){
 			cerr << "no more key space\n";
 			exit(1);
 		}
-		sprintf(keys->keylist+i, "%s", (key+":").c_str());
+		sprintf(keys->keylist+i, "%s:", key.c_str());
 		break;
 
 	//list or delete all keys
