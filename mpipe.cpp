@@ -163,7 +163,7 @@ void handleKeys(string key, int action){
 				break;
 			case CLEAR:
 				hashed = hasher(split[ii]);
-				getVal(split[ii], hashed, DELETE);
+				getVal(split[ii], hashed, DEL_NOKEY);
 			}
 		}
 		if (action == CLEAR)
