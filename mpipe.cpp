@@ -11,7 +11,7 @@
 #define keylistsize 10000
 using namespace std;
 
-enum { SET, UPDATE, SHOW, DELETE, CLEAR, GET, POP, CHECK };
+enum { SET, UPDATE, SHOW, DELETE, DEL_NOKEY, CLEAR, GET, POP, CHECK };
 void handleKeys(string, int);
 typedef struct chunk {
 	int size;
@@ -35,12 +35,10 @@ void setVal(string key, list<chunk> chunks, int size, int hashed, int action){
 	bool newkey = true;
 	byte* dataPtr;
 	int dataId = shmget(hashed, size, IPC_EXCL | IPC_CREAT | 0666);
-	//set if empty
+
 	if (action == SET && dataId < 0){
 		perror("key unavailable");
 		exit(1);
-
-	//set even if not empty
 	} else if (action == UPDATE && dataId < 0) {
 		newkey = false;
 		dataId = shmget(hashed, 0, 0);
@@ -70,7 +68,7 @@ void setVal(string key, list<chunk> chunks, int size, int hashed, int action){
 void getVal(string key, int hashed, int action){
 	int dataId = shmget(hashed, 0, 0);
 	if (dataId<0) {
-		perror("key error");
+		cerr << "key unused\n";
 		exit(1);
 	}
 	shmid_ds info;
@@ -84,19 +82,25 @@ void getVal(string key, int hashed, int action){
 
 	byte *dataPtr = (byte*) shmat(dataId, NULL, 0);
 	if (dataPtr==(void*)-1) {
-		perror("data error");
+		perror("data access error");
 		exit(1);
 	}
 
 	//retrieve value
 	if (action == GET || action == POP)
-			write(1, dataPtr, info.shm_segsz);
+		write(1, dataPtr, info.shm_segsz);
 	shmdt(dataPtr);
 
 	//delete
-	if (action == DELETE || action == POP){
+	switch (action) {
+	case DELETE:
+	case POP:
 		shmctl(dataId, IPC_RMID, NULL);
 		handleKeys(key, DELETE);
+		break;
+	case DEL_NOKEY:
+		shmctl(dataId, IPC_RMID, NULL);
+		break;
 	}
 }
 
@@ -115,7 +119,7 @@ void handleKeys(string key, int action){
 	if (metaId<0) {
 		metaId = shmget(metaShmKey, sizeof(metadata), 0);
 		if (metaId<0) {
-			cerr<<"metakey error\n";
+			cerr << "keylist key error\n";
 			exit(1);
 		}
 	} else {
@@ -123,7 +127,7 @@ void handleKeys(string key, int action){
 	}
 	metadata *keys = (metadata*) shmat(metaId, NULL, 0);
 	if (keys==(void*)-1) {
-		cerr<<"metakey list error\n";
+		cerr << "keylist error\n";
 		exit(1);
 	}
 	hash<string> hasher;
@@ -192,7 +196,7 @@ int main(int argc, char**argv){
 	} else if (argc == 3) {
 		key = string(argv[2]);
 	} else{
-		cerr << "usage: " << argv[0] << " <set | get | pop | up | chk | del | clear> <key>\n"
+		cout << "usage: " << argv[0] << " <set | get | pop | up | chk | del | clear> <key>\n"
 			 << "	   When using set or up, send input to stdin\n";
 		exit(1);
 	}
