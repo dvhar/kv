@@ -172,11 +172,19 @@ void handleKeys(string key, int action){
 
 	//remove single key
 	case DELETE:
-		split = splitter(keys->keylist);
-		string S("");
-		for (uint ii=0; ii<split.size(); ii++)
-			if (split[ii] != key) S += (split[ii] + ":");
-		strncpy(keys->keylist, S.c_str(), keylistsize);
+		int i=0, j=0, len=strlen(keys->keylist);
+		for (string S = ""; i<len; ++i, ++j){
+			if (keys->keylist[i] == ':') {
+				if (key == S)
+					j -= S.length()+1;
+				S = "";
+			} else {
+				S += keys->keylist[i];
+			}
+			if (j >= 0)
+				keys->keylist[j] = keys->keylist[i];
+		}
+		keys->keylist[j] = 0;
 	}
 	shmdt(keys);
 }
