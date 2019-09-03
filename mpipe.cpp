@@ -5,7 +5,7 @@
 #include <sys/shm.h>
 #include <sys/ipc.h>
 #include <unistd.h>
-#include <boost/algorithm/string.hpp>
+#include <string.h>
 #define metaShmKey 875784987
 #define chunksize 8192
 #define keylistsize 10000
@@ -106,9 +106,13 @@ void getVal(string key, int hashed, int action){
 
 vector<string> splitter(char* input) {
 	vector<string> split;
-	string text = string(input);
-	if (text.length()>0) text.pop_back();
-	boost::split(split, text, [](char c){return c == ':';});
+	string S = "";
+	for (int i=0; input[i] != 0; ++i)
+		if (input[i] == ':') {
+			split.push_back(S);
+			S.clear();
+		} else
+			S.push_back(input[i]);
 	return split;
 }
 
@@ -172,15 +176,14 @@ void handleKeys(string key, int action){
 
 	//remove single key
 	case DELETE:
-		int i=0, j=0, len=strlen(keys->keylist);
-		for (string S = ""; i<len; ++i, ++j){
+		int i=0, j=0;
+		for (string S = ""; keys->keylist[i] != 0; ++i, ++j){
 			if (keys->keylist[i] == ':') {
 				if (key == S)
 					j -= S.length()+1;
-				S = "";
-			} else {
-				S += keys->keylist[i];
-			}
+				S.clear();
+			} else
+				S.push_back(keys->keylist[i]);
 			if (j >= 0)
 				keys->keylist[j] = keys->keylist[i];
 		}
