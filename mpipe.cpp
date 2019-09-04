@@ -104,18 +104,6 @@ void getVal(string key, int hashed, int action){
 	}
 }
 
-vector<string> splitter(char* input) {
-	vector<string> split;
-	string S = "";
-	for (int i=0; input[i] != 0; ++i)
-		if (input[i] == ':') {
-			split.push_back(S);
-			S.clear();
-		} else
-			S.push_back(input[i]);
-	return split;
-}
-
 void handleKeys(string key, int action){
 	//attach to metadata
 	int metaId = shmget(metaShmKey, sizeof(metadata), IPC_EXCL | IPC_CREAT | 0666);
@@ -135,9 +123,9 @@ void handleKeys(string key, int action){
 		exit(1);
 	}
 	hash<string> hasher;
+	string S("");
 	int hashed;
 	int i=0;
-	vector<string> split;
 
 	//initialize
 	if (init)
@@ -158,26 +146,26 @@ void handleKeys(string key, int action){
 	//list or delete all keys
 	case SHOW:
 	case CLEAR:
-		split = splitter(keys->keylist);
-		for (uint ii=0; ii<split.size(); ii++){
-			if (split[ii] == "") continue;
-			switch (action){
-			case SHOW:
-				cout << split[ii] << endl;
-				break;
-			case CLEAR:
-				hashed = hasher(split[ii]);
-				getVal(split[ii], hashed, DEL_NOKEY);
-			}
-		}
-		if (action == CLEAR)
-			memset(keys->keylist, 0, keylistsize);
+		for (int i=0; keys->keylist[i] != 0; ++i)
+			if (keys->keylist[i] == ':') {
+				switch (action){
+				case SHOW:
+					cout << S << endl;
+					break;
+				case CLEAR:
+					hashed = hasher(S);
+					getVal(S, hashed, DEL_NOKEY);
+				}
+				S.clear();
+			} else
+				S.push_back(keys->keylist[i]);
+		memset(keys->keylist, 0, keylistsize);
 		break;
 
 	//remove single key
 	case DELETE:
 		int i=0, j=0;
-		for (string S = ""; keys->keylist[i] != 0; ++i, ++j){
+		for (; keys->keylist[i] != 0; ++i, ++j){
 			if (keys->keylist[i] == ':') {
 				if (key == S)
 					j -= S.length()+1;
