@@ -159,7 +159,8 @@ void handleKeys(string key, int action){
 				S.clear();
 			} else
 				S.push_back(keys->keylist[i]);
-		memset(keys->keylist, 0, keylistsize);
+		if (action == CLEAR)
+			memset(keys->keylist, 0, keylistsize);
 		break;
 
 	//remove single key
