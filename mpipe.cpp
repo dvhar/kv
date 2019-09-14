@@ -34,7 +34,7 @@ map<string, int> commands = {
 void setVal(string key, list<chunk> chunks, int size, int hashed, int action){
 	bool newkey = true;
 	byte* dataPtr;
-	int dataId = shmget(hashed, size, IPC_EXCL | IPC_CREAT | 0666);
+	int dataId = shmget(hashed, size, IPC_EXCL | IPC_CREAT | 0600);
 
 	if (action == SET && dataId < 0){
 		perror("key unavailable");
@@ -45,7 +45,7 @@ void setVal(string key, list<chunk> chunks, int size, int hashed, int action){
 		dataPtr = (byte*) shmat(dataId, NULL, 0);
 		shmdt(dataPtr);
 		shmctl(dataId, IPC_RMID, NULL);
-		dataId = shmget(hashed, size, IPC_CREAT | IPC_EXCL | 0666);
+		dataId = shmget(hashed, size, IPC_CREAT | IPC_EXCL | 0600);
 		if (dataId<0) {
 			perror("key error");
 			exit(1);
@@ -106,7 +106,7 @@ void getVal(string key, int hashed, int action){
 
 void handleKeys(string key, int action){
 	//attach to metadata
-	int metaId = shmget(metaShmKey, sizeof(metadata), IPC_EXCL | IPC_CREAT | 0666);
+	int metaId = shmget(metaShmKey, sizeof(metadata), IPC_EXCL | IPC_CREAT | 0600);
 	int init = 0;
 	if (metaId<0) {
 		metaId = shmget(metaShmKey, sizeof(metadata), 0);
