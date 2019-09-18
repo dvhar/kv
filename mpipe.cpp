@@ -94,11 +94,7 @@ void getVal(string key, int hashed, int action){
 	switch (action) {
 	case DELETE:
 	case POP:
-		memset(dataPtr, 0, info.shm_segsz);
-		shmdt(dataPtr);
-		shmctl(dataId, IPC_RMID, NULL);
 		handleKeys(key, DELETE);
-		break;
 	case DEL_NOKEY:
 		memset(dataPtr, 0, info.shm_segsz);
 		shmdt(dataPtr);
