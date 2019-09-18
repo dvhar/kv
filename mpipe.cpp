@@ -89,18 +89,23 @@ void getVal(string key, int hashed, int action){
 	//retrieve value
 	if (action == GET || action == POP)
 		write(1, dataPtr, info.shm_segsz);
-	shmdt(dataPtr);
 
 	//delete
 	switch (action) {
 	case DELETE:
 	case POP:
+		memset(dataPtr, 0, info.shm_segsz);
+		shmdt(dataPtr);
 		shmctl(dataId, IPC_RMID, NULL);
 		handleKeys(key, DELETE);
 		break;
 	case DEL_NOKEY:
+		memset(dataPtr, 0, info.shm_segsz);
+		shmdt(dataPtr);
 		shmctl(dataId, IPC_RMID, NULL);
 		break;
+	default:
+		shmdt(dataPtr);
 	}
 }
 
