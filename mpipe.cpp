@@ -9,6 +9,7 @@
 #define metaShmKey 875784987
 #define chunksize 8192
 #define keylistsize 10000
+#define keysize 21
 using namespace std;
 
 enum { SET, UPDATE, SHOW, DELETE, DEL_NOKEY, CLEAR, GET, POP, CHECK };
@@ -20,6 +21,10 @@ typedef struct chunk {
 typedef struct metadata {
 	char keylist[keylistsize];
 } metadata ;
+typedef struct entry {
+	char key[keysize];
+	byte data[];
+} entry;
 map<string, int> commands = {
 	{"get", GET},
 	{"set", SET},
@@ -30,65 +35,98 @@ map<string, int> commands = {
 	{"clear", CLEAR},
 	{"chk", CHECK}
 };
+hash<string> hasher;
 
-void setVal(string key, list<chunk> chunks, int size, int hashed, int action){
+void setVal(string key, list<chunk> chunks, int size, int hashed, int action, int tries){
 	bool newkey = true;
-	byte* dataPtr;
-	int dataId = shmget(hashed, size, IPC_EXCL | IPC_CREAT | 0600);
-
-	if (action == SET && dataId < 0){
-		perror("key unavailable");
-		exit(1);
-	} else if (action == UPDATE && dataId < 0) {
-		newkey = false;
+	entry* dataPtr;
+	int dataId = shmget(hashed, size+keysize, IPC_EXCL | IPC_CREAT | 0600);
+	shmid_ds info;
+	if (dataId < 0){
 		dataId = shmget(hashed, 0, 0);
-		dataPtr = (byte*) shmat(dataId, NULL, 0);
-		shmdt(dataPtr);
-		shmctl(dataId, IPC_RMID, NULL);
-		dataId = shmget(hashed, size, IPC_CREAT | IPC_EXCL | 0600);
-		if (dataId<0) {
-			perror("key error");
+		dataPtr = (entry*) shmat(dataId, NULL, 0);
+		if (dataPtr==(void*)-1) {
+			perror("data access error");
+			exit(1);
+		}
+		shmctl(dataId, IPC_STAT, &info);
+		//key collision
+		if (info.shm_segsz < keysize || string(dataPtr->key) != key){
+			if (tries > 5) {
+				cerr << "key unavailable1\n";
+				exit(1);
+			}
+			shmdt(dataPtr);
+			setVal(key, chunks, size, hashed+1, action, tries+1);
+			exit(0);
+		//updating preexisting value
+		} else if (action == UPDATE) {
+			newkey = false;
+			dataId = shmget(hashed, 0, 0);
+			dataPtr = (entry*) shmat(dataId, NULL, 0);
+			shmdt(dataPtr);
+			shmctl(dataId, IPC_RMID, NULL);
+			dataId = shmget(hashed, size+keysize, IPC_CREAT | IPC_EXCL | 0600);
+			if (dataId<0) {
+				perror("key error");
+				exit(1);
+			}
+		//key is taken and not updating
+		} else {
+			cerr << "key unavailable2\n";
 			exit(1);
 		}
 	}
 
-	dataPtr = (byte*) shmat(dataId, NULL, 0);
+	dataPtr = (entry*) shmat(dataId, NULL, 0);
 	if (dataPtr==(void*)-1) {
 		perror("data access error");
 		exit(1);
 	}
-	int ii=0;
-	for (list<chunk>::iterator it=chunks.begin(); it!=chunks.end(); ii+=it->size, ++it)
-		memcpy(dataPtr+ii, it->data, it->size);
+	int i=0;
+	for (list<chunk>::iterator it=chunks.begin(); it!=chunks.end(); i+=it->size, ++it)
+		memcpy(dataPtr->data+i, it->data, it->size);
+	sprintf(dataPtr->key, "%s", key.c_str());
 	if (newkey)
 		handleKeys(key, SET);
 	shmdt(dataPtr);
 }
 
-void getVal(string key, int hashed, int action){
-	int dataId = shmget(hashed, 0, 0);
-	if (dataId<0) {
-		cerr << "key unused\n";
-		exit(1);
-	}
+void getVal(string key, int hashed, int action, int tries){
 	shmid_ds info;
-	shmctl(dataId, IPC_STAT, &info);
-
-	//return size if checking
-	if (action == CHECK){
-		cout << info.shm_segsz << endl;
-		exit(0);
-	}
-
-	byte *dataPtr = (byte*) shmat(dataId, NULL, 0);
+	entry* dataPtr;
+	int dataId = shmget(hashed, 0, 0);
+	if (dataId<0)
+		goto trynext;
+	dataPtr = (entry*) shmat(dataId, NULL, 0);
 	if (dataPtr==(void*)-1) {
 		perror("data access error");
 		exit(1);
 	}
+	shmctl(dataId, IPC_STAT, &info);
+	if (info.shm_segsz >= keysize && string(dataPtr->key) == key)
+		goto foundit;
+	else
+		shmdt(dataPtr);
+
+	trynext:
+	if (tries > 5) {
+		cerr << "key unused\n";
+		exit(1);
+	}
+	getVal(key, hashed+1, action, tries+1);
+	exit(0);
+	foundit:
+
+	//return size if checking
+	if (action == CHECK){
+		cout << info.shm_segsz-keysize << endl;
+		exit(0);
+	}
 
 	//retrieve value
 	if (action == GET || action == POP)
-		write(1, dataPtr, info.shm_segsz);
+		write(1, dataPtr->data, info.shm_segsz-keysize);
 
 	//delete
 	switch (action) {
@@ -123,7 +161,6 @@ void handleKeys(string key, int action){
 		cerr << "keylist error\n";
 		exit(1);
 	}
-	hash<string> hasher;
 	string S("");
 	int hashed;
 	int i=0;
@@ -155,7 +192,7 @@ void handleKeys(string key, int action){
 					break;
 				case CLEAR:
 					hashed = hasher(S);
-					getVal(S, hashed, DEL_NOKEY);
+					getVal(S, hashed, DEL_NOKEY, 0);
 				}
 				S.clear();
 			} else
@@ -185,7 +222,6 @@ void handleKeys(string key, int action){
 int main(int argc, char**argv){
 	string key, command;
 	list<chunk> chunks;
-	hash<string> hasher;
 
 	if (argc > 1) command = string(argv[1]);
 	if (argc == 2 && command == "clear") {
@@ -213,18 +249,22 @@ int main(int argc, char**argv){
 				cerr << "key cannot contain ':'\n";
 				exit(1);
 			}
+			if (key.size() >= 20) {
+				cerr << "max key size is " << keysize+1 << endl;
+				exit(1);
+			}
 			chunk temp;
 			while((temp.size = read(0, temp.data, sizeof(temp.data))) > 0){
 				size += temp.size;
 				chunks.push_back(temp);
 			}
-			setVal(key, chunks, size, hashed, action);
+			setVal(key, chunks, size, hashed, action, 0);
 			break;
 		case GET:
 		case POP:
 		case CHECK:
 		case DELETE:
-			getVal(key, hashed, action);
+			getVal(key, hashed, action, 0);
 			break;
 		default:
 			cerr << "Invalid command: " << command << endl;
