@@ -37,7 +37,7 @@ map<string, int> commands = {
 };
 hash<string> hasher;
 
-void setVal(string key, list<chunk> chunks, int size, int hashed, int action, int tries){
+void setVal(string key, list<chunk> &chunks, int size, int hashed, int action, int tries){
 	bool newkey = true;
 	entry* dataPtr;
 	int dataId = shmget(hashed, size+keysize, IPC_EXCL | IPC_CREAT | 0600);
