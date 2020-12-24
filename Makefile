@@ -1,4 +1,4 @@
-all: mpipe
+all: kv
 
-mpipe: mpipe.cpp
-	clang++ --std=c++2a -Wall $^ -o mpipe
+mpipe: kv.cpp
+	c++ --std=c++2a -Wall $^ -o kv

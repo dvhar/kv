@@ -1,0 +1,5 @@
+# Shared Memory Key-Value Store
+
+* Run with no args to see usage info
+* Store data by sending it to stdin
+* Retrieve data by reading stdout

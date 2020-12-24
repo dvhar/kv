@@ -11,19 +11,20 @@
 #define keylistsize 10000
 #define keysize 21
 using namespace std;
+using u8 = unsigned char;
 
 enum { SET, UPDATE, SHOW, DELETE, DEL_NOKEY, CLEAR, GET, POP, CHECK };
 void handleKeys(string, int);
 typedef struct chunk {
 	int size;
-	byte data[chunksize];
+	u8 data[chunksize];
 } chunk ;
 typedef struct metadata {
 	char keylist[keylistsize];
 } metadata ;
 typedef struct entry {
 	char key[keysize];
-	byte data[];
+	u8 data[];
 } entry;
 map<string, int> commands = {
 	{"get", GET},
@@ -233,9 +234,18 @@ int main(int argc, char**argv){
 	} else if (argc == 3) {
 		key = string(argv[2]);
 	} else{
-		cout << "usage: " << argv[0] << " <set | get | pop | up | chk | del | clear> <key>\n"
-			 << "	   When using set or up, send input to stdin\n";
-		exit(1);
+		cout << "usage: " << argv[0] << " <command>\n"
+			 "Available commands: \n"
+			 "\tset <key>\n"
+			 "\tget <key>\n"
+			 "\tdel <key>\n"
+			 "\tpop <key>    (get and delete)\n"
+			 "\tup <key>     (update)\n"
+			 "\tchk <key>    (get size)\n"
+			 "\tclear        (delete all)\n"
+			 "\tshow         (show all keys)\n"
+			 "When using set or up, send input to stdin\n";
+		exit(0);
 	}
 
 	int hashed = hasher(key),
